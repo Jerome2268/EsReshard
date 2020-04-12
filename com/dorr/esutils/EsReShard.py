@@ -70,10 +70,14 @@ def convert(store_size: str):
         dorr_store += float(store_size[:-2]) * 1024
     elif "g" in store_size:
         dorr_store += float(store_size[:-2]) * 1024 * 1024
-    elif "p" in store_size:
+    elif "t" in store_size:
         dorr_store += float(store_size[:-2]) * 1024 * 1024 * 1024
+    elif "p" in store_size:
+        dorr_store += float(store_size[:-2]) * 1024 * 1024 * 1024 * 1024
+    elif "p" in store_size:
+        dorr_store += float(store_size[:-2]) * 1024 * 1024 * 1024 * 1024 * 1024
     else:
-        dorr_store += float(store_size[:-1]) / 1024
+        dorr_store += float(store_size[:-2]) / 1024
     return dorr_store
 
 
