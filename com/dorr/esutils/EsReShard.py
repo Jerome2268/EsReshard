@@ -10,8 +10,7 @@ import os
 import sys
 import logging
 
-
-logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 # 计算存储空间的函数
 url = "hadoop102"
@@ -19,6 +18,8 @@ percent = 0.0001
 seeIfBalance = False
 seeExchangePlan = False
 seeIfExecute = False
+ifReverse = True
+
 # 默认第一个参数是当前的路径
 es = Elasticsearch([url],
                    sniff_on_start=True,  # 连接前测试
@@ -27,7 +28,7 @@ es = Elasticsearch([url],
 if (es.ping()):
     logger.info("successfully connected es cluster")
 logger.info(str(len(sys.argv)) + " : " + sys.argv[0] + " : " + sys.argv[1])
-if(sys.argv.__contains__("-c")):
+if (sys.argv.__contains__("-c")):
     seeIfBalance = True
     logger.info("正在检查 ---- 请稍后")
 
@@ -38,15 +39,17 @@ if(sys.argv.__contains__("-g")):
     seeIfExecute = True
     logger.info("正在 准备执行平衡任务 ，请稍后")
 
-if(sys.argv.__contains__("-u")):
+if (sys.argv.__contains__("-r")):
+    ifReverse = False
+if (sys.argv.__contains__("-u")):
     for i in range(len(sys.argv)):
         try:
-            if(sys.argv[i] == "-u"):
-                url = sys.argv[i+1]
+            if (sys.argv[i] == "-u"):
+                url = sys.argv[i + 1]
                 logger.info("设置连接 url 为 " + sys.argv[i + 1])
 
         except IndexError:
-            logger.fatal("-u 参数输入有误  将使用默认值"  + url)
+            logger.fatal("-u 参数输入有误  将使用默认值" + url)
 
 if(sys.argv.__contains__("-p")):
     for i in range(len(sys.argv)):
@@ -60,8 +63,10 @@ if(sys.argv.__contains__("-p")):
 else:
     logger.info("使用默认容忍度 " + str(percent * 100) + "%")
 
+
 def convert(store_size: str):
-    if (store_size == None):
+    # es 拿到的默认大小是none  ，而非 None
+    if (store_size == "none"):
         return 0.0
     dorr_store = 0.0
     if "k" in store_size:
@@ -77,7 +82,11 @@ def convert(store_size: str):
     elif "p" in store_size:
         dorr_store += float(store_size[:-2]) * 1024 * 1024 * 1024 * 1024 * 1024
     else:
-        dorr_store += float(store_size[:-2]) / 1024
+        print("store_size[:-2]", store_size[:-2])
+        print("store_size[:-1]", store_size[:-1])
+        print("store_size", store_size)
+
+        dorr_store += float(store_size[:-1]) / 1024
     return dorr_store
 
 
@@ -284,14 +293,14 @@ def getIndexShade(node, num, reverse=False):
     return sorted(node.index_shade_list, reverse=reverse, key=lambda s: convert(s[3]))[num]
 
 
-def change(lowerList, higerList,  ifExecute=False, f=move):
+def change(lowerList, higerList, ifExecute=False, ifReverse=ifReverse, f=move):
     # 空值判断在之前一轮中已经进行了  最大的一个节点
     toNode = getNode(lowerList, 0)
     for m in range(len(higerList) - 1, -1, -1):
         fromNode = getNode(higerList, m)
         for i in range(len(fromNode.index_shade_list) - 1):
             # 在High list和Low list之间拿较大的 shade 先进行平衡
-            indexShade = getIndexShade(fromNode, i, reverse=True)
+            indexShade = getIndexShade(fromNode, i, reverse=ifReverse)
             if (not toNode.checkIfConflict(indexShade) and (
                     convert(toNode.storeValue) + convert(indexShade[3]) < convert(fromNode.storeValue))):
                 # 判断完成说明可以移动
