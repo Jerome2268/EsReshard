@@ -1,14 +1,13 @@
 #!/usr/bin/python3
 # -*- coding: UTF-8 -*-
-
-# 目前计划问题  ： reroute 计划可行  但是 reroute的过程中 失败  需要调整checkifconfilict 函数
-# reason: [YES(shard has no previous failures)][YES(primary shard for this replica is already active)][YES(explicitly ignoring any disabling of allocation due to manual allocation commands via the reroute API)][YES(can allocate replica shard to a node with version [7.6.2] since this is equal-or-newer than the primary version [7.6.2])][YES(the shard is not being snapshotted)][YES(ignored as shard is not being recovered from a snapshot)][YES(node passes include/exclude/require filters)][NO(the shard cannot be allocated to the same node on which a copy of the shard already exists [[indextest14][8], node[8MeQmCl_R-CQJD6RlbFmtg], relocating [xyWQRA0ORtC1tjjJe1WRpg], [P], s[RELOCATING], a[id=CjhtOKY6TTyoY5idXDUOAw, rId=An206dPtTsS60Oo-CyQ_pQ], expected_shard_size[24726]])][YES(enough disk for shard on node, free: [22.6gb], shard size: [24.1kb], free after allocating shard: [22.6gb])][THROTTLE(reached the limit of outgoing shard recoveries [2] on the node [8MeQmCl_R-CQJD6RlbFmtg] which holds the primary, cluster setting [cluster.routing.allocation.node_concurrent_outgoing_recoveries=2] (can also be set via [cluster.routing.allocation.node_concurrent_recoveries]))][YES(total shard limits are disabled: [index: -1, cluster: -1] <= 0)][YES(allocation awareness is not enabled, set cluster setting [cluster.routing.allocation.awareness.attributes] to enable it)]
-#  [dorr-2] failed to perform [cluster_reroute (api)]java.lang.IllegalArgumentException: [move_allocation] can't move 1, failed to find it on node {dorr-1}{xyWQRA0ORtC1tjjJe1WRpg}{z9SGpS4XSGiHy70zb11C2g}{hadoop102}{192.168.58.12:9301}{dilm}{ml.machine_memory=8189157376, ml.max_open_jobs=20, xpack.installed=true}
+# usage: python3 EsReshard.py |-c|-s|-g|-r|   |-u + url|   |-p +percent|
+# 使用此脚本需关闭es集群的自动平衡(脚本自动关闭) 否则影响平衡结果
 
 from elasticsearch import Elasticsearch
 import os
 import sys
 import logging
+import time
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -19,23 +18,18 @@ seeIfBalance = False
 seeExchangePlan = False
 seeIfExecute = False
 ifReverse = True
-
-# 默认第一个参数是当前的路径
-es = Elasticsearch([url],
-                   sniff_on_start=True,  # 连接前测试
-                   sniff_on_connection_fail=True,  # 节点无响应时刷新节点
-                   sniff_timeout=60)  # 设置超时时间)
-if (es.ping()):
-    logger.info("successfully connected es cluster")
-logger.info(str(len(sys.argv)) + " : " + sys.argv[0] + " : " + sys.argv[1])
+if (len(sys.argv) == 1):
+    logger.info("usage: python3 EsReshard.py |-c|-s|-g|-r|   |-u + url|   |-p +percent|  ")
+    logger.info(
+        "usage:-c:showDiskStatus  -s : showBalancePlan  -g:follow the balance plan and execute    -r : Balance Strategy(big shard first or not )   -p:tolerance")
 if (sys.argv.__contains__("-c")):
     seeIfBalance = True
     logger.info("正在检查 ---- 请稍后")
 
-if(sys.argv.__contains__("-s")):
+if (sys.argv.__contains__("-s")):
     seeExchangePlan = True
     logger.info("正在计算执行计划 ， 请稍后")
-if(sys.argv.__contains__("-g")):
+if (sys.argv.__contains__("-g")):
     seeIfExecute = True
     logger.info("正在 准备执行平衡任务 ，请稍后")
 
@@ -51,18 +45,25 @@ if (sys.argv.__contains__("-u")):
         except IndexError:
             logger.fatal("-u 参数输入有误  将使用默认值" + url)
 
-if(sys.argv.__contains__("-p")):
+if (sys.argv.__contains__("-p")):
     for i in range(len(sys.argv)):
         try:
-            if(sys.argv[i] == "-p"):
-                percent = float(sys.argv[i+1])
+            if (sys.argv[i] == "-p"):
+                percent = float(sys.argv[i + 1])
                 logger.info("设置容忍度为 " + str(percent * 100) + "%")
 
         except IndexError:
             logger.fatal("-p 参数输入有误  将使用默认值" + str(percent * 100) + "%")
 else:
     logger.info("使用默认容忍度 " + str(percent * 100) + "%")
-
+# 默认第一个参数是当前的路径
+es = Elasticsearch([url],
+                   sniff_on_start=True,  # 连接前测试
+                   sniff_on_connection_fail=True,  # 节点无响应时刷新节点
+                   sniff_timeout=60)  # 设置超时时间)
+if (es.ping()):
+    logger.info("successfully connected es cluster")
+logger.info(str(len(sys.argv)) + " : " + sys.argv[0] + " : " + sys.argv[1])
 
 def convert(store_size: str):
     # es 拿到的默认大小是none  ，而非 None
@@ -81,7 +82,7 @@ def convert(store_size: str):
         dorr_store += float(store_size[:-2]) * 1024 * 1024 * 1024
     elif "p" in store_size:
         dorr_store += float(store_size[:-2]) * 1024 * 1024 * 1024 * 1024
-    elif "p" in store_size:
+    elif "z" in store_size:
         dorr_store += float(store_size[:-2]) * 1024 * 1024 * 1024 * 1024 * 1024
     else:
         dorr_store += float(store_size[:-1]) / 1024
@@ -164,8 +165,21 @@ class Node_Shade:
         return False
 
 
+def esCheck(es, node):
+    nod = Node_Shade(node)
+    shards = es.cat.shards(format='json')
+    for i in shards:
+        if (i['node'] == node):
+            store_size = str(i['store']).lower()
+            if (i['prirep'] == "p"):
+                nod.addShade((i['index'], i['shard'], "p", i['store']))
+            if (i['prirep'] == "r"):
+                nod.addShade((i['index'], i['shard'], "r", i['store']))
+
+    return nod.storeValue
+
+
 def computeStoreSize(shards, node, nod: Node_Shade):
-    dorr_store = float(nod.storeValue[:-2])
     for i in shards:
         # {'index': '.kibana_1', 'node': 'dorr-1', 'state': 'STARTED', 'docs': '21', 'shard': '0', 'prirep': 'p', 'ip': '192.168.58.12', 'store': '44.2kb'}
         if (i['node'] == node):
@@ -174,23 +188,46 @@ def computeStoreSize(shards, node, nod: Node_Shade):
                 nod.addShade((i['index'], i['shard'], "p", i['store']))
             if (i['prirep'] == "r"):
                 nod.addShade((i['index'], i['shard'], "r", i['store']))
-            dorr_store += convert(store_size)
-            nod.setStoreValue(str(dorr_store) + "kb")
     return nod
 
 
 # {'prirep': 'p', 'ip': '192.168.58.14', 'node': 'dorr-3', 'shard': '0', 'docs': '1', 'index': 'p5', 'state': 'STARTED', 'store': '4kb'}
-def move(url, index, shard, fromnode, tonode):
+def move(url, index, shard, fromnode, tonode, storeValue):
     # 命令是异步的 过于简单 容易出问题
     logger.info("start to execute the moving process")
     command = "curl -H \"Content-Type: application/json\" -XPOST \"" + url + ":9200/_cluster/reroute\" -d  '{\"commands\" : [{\"move\" : {\"index\" : \"" + index + "\",\"shard\" : " + str(
-        shard) + ",\"from_node\" : \"" + fromnode + "\",\"to_node\" : \"" + tonode + "\"}}]}' "
-    os.popen(cmd=command)
+        shard) + ",\"from_node\" : \"" + fromnode.node + "\",\"to_node\" : \"" + tonode.node + "\"}}]}' "
+    flag = 1
+    while not flag == 0:
+        flag = os.system(command=command)
+        file = open("execute.log", "a+")
+        t = float(convert(storeValue) / 20)
+        time.sleep(t)
+        if (flag == 0):
+            toNodeCheckValue = esCheck(es=es, node=tonode.node)
+            fromNodeCheckValue = esCheck(es=es, node=fromnode.node)
+            file.write(
+                "从" + fromnode.node + "大小:" + fromnode.storeValue + "到" + tonode.node + "大小为" + tonode.storeValue + "传输index:" + index + "  shard :" + shard + "成功了!" + " shard大小为 " + storeValue + "   node :" + tonode.node + "计算大小 :   " + str(
+                    convert(tonode.storeValue) + convert(
+                        storeValue)) + "kb  实时tonode es存储大小为:     " + toNodeCheckValue + "变化量" + str(
+                    convert(toNodeCheckValue) - convert(
+                        tonode.storeValue)) + "kb实时fromNode大小：  " + fromNodeCheckValue + "变化量" + str(
+                    convert(fromNodeCheckValue) - convert(fromnode.storeValue)) + "kb\n")
+        else:
+            file.write(
+                "----------------------------------------------------------------------------------------------------------\n")
+            file.write(command)
+            file.write(
+                "从" + fromnode.node + "到" + tonode.node + "传输index:" + index + "  shard :" + shard + "失败了" + "shard大小为" + storeValue + "\n")
+            file.write(
+                "----------------------------------------------------------------------------------------------------------\n")
     logger.info("follow command:" + command)
+
     logger.info("finshed  the moving process")
 
 def showCap(nodeList, percent):
-    logger.info("sumMem" + str(sumMem) + "kb --balancedStore:"+ str(avgMem * (1 - percent))+ "kb~"+str(avgMem)+ "kb~"+ str(avgMem * (1 + percent))+"kb")
+    logger.info("sumMem" + str(sumMem) + "kb --balancedStore:" + str(avgMem * (1.0 - percent)) + "kb~" + str(
+        avgMem) + "kb~" + str(avgMem * (1.0 + percent)) + "kb")
     for i in nodeList:
         info = i.node + "节点存储大小为" + i.storeValue
         logger.info(info)
@@ -302,15 +339,17 @@ def change(lowerList, higerList, ifExecute=False, ifReverse=ifReverse, f=move):
             if (not toNode.checkIfConflict(indexShade) and (
                     convert(toNode.storeValue) + convert(indexShade[3]) < convert(fromNode.storeValue))):
                 # 判断完成说明可以移动
-                logger.info("将从" + fromNode.node + "向"+ toNode.node+ "移动index:"+ indexShade[0]+ "    shade :"+
-                          indexShade[1]+ "移动的大小 :"+ indexShade[3]+
-                          "移动前容量大小为"+ toNode.storeValue +"移动后为"+
-                          str(convert(toNode.storeValue) + convert(indexShade[3]))+
-                          "kb")
-                toNode.addShade(indexShade)
-                fromNode.removeShade(indexShade)
+                logger.info("将从" + fromNode.node + "向" + toNode.node + "移动index:" + indexShade[0] + "    shade :" +
+                            indexShade[1] + "移动的大小 :" + indexShade[3] +
+                            "移动前容量大小为" + toNode.storeValue + "移动后为" +
+                            str(convert(toNode.storeValue) + convert(indexShade[3])) +
+                            "kb")
+
                 if (ifExecute):
-                    f(url, indexShade[0], indexShade[1], fromNode.node, toNode.node)
+                    f(url=url, index=indexShade[0], shard=indexShade[1], fromnode=fromNode, tonode=toNode,
+                      storeValue=indexShade[3])
+                fromNode.removeShade(indexShade)
+                toNode.addShade(indexShade)
                 return True
     return False
 
@@ -329,17 +368,19 @@ def changeLowerWithAvg(lowList, avgList, percent, ifExecute=False, f=move):
             # showCap(NodeList,percent)
             if (not toNode.checkIfConflict(indexShade) and (fromNodeValue - indexShadeValue) > lowLimit):
                 # 判断完成说明可以移动
-                logger.info("将从" + fromNode.node+ "向"+ toNode.node+ "移动index:"+ indexShade[0]+ "    shade :"+
-                          indexShade[1]+ "移动的大小 :"+ indexShade[3]+
-                          "移动前容量大小为"+ toNode.storeValue+ "移动后为"+
-                          str(convert(toNode.storeValue) + convert(indexShade[3]))+
-                          "kb")
-                toNode.addShade(indexShade)
-                fromNode.removeShade(indexShade)
+                logger.info("将从" + fromNode.node + "向" + toNode.node + "移动index:" + indexShade[0] + "    shade :" +
+                            indexShade[1] + "移动的大小 :" + indexShade[3] +
+                            "移动前容量大小为" + toNode.storeValue + "移动后为" +
+                            str(convert(toNode.storeValue) + convert(indexShade[3])) +
+                            "kb")
+
                 # 此处放上移动的命令
                 # 只要移动了一次
                 if (ifExecute):
-                    f(url, indexShade[0], indexShade[1], fromNode.node, toNode.node)
+                    f(url=url, index=indexShade[0], shard=indexShade[1], fromnode=fromNode, tonode=toNode,
+                      storeValue=indexShade[3])
+                fromNode.removeShade(indexShade)
+                toNode.addShade(indexShade)
                 # 移动了就应该为True
                 return True
     return False
@@ -358,17 +399,20 @@ def changeHighListWithAvg(avgList, highNode, percent, ifExecute=False, f=move):
             upperLimit = avgMem * (1 + percent)
             if (not toNode.checkIfConflict(indexShade) and (toNodeValue + indexShadeValue) < upperLimit):
                 # 判断完成说明可以移动
-                logger.info("将从" + fromNode.node+ "向"+ toNode.node+ "移动index:"+ indexShade[0]+ "    shade :"+
-                          indexShade[1]+ "移动的大小 :"+ indexShade[3]+
-                          "移动前容量大小为"+ toNode.storeValue+ "移动后为"+
-                          str(convert(toNode.storeValue) + convert(indexShade[3]))+
-                          "kb")
-                toNode.addShade(indexShade)
-                fromNode.removeShade(indexShade)
+                logger.info("将从" + fromNode.node + "向" + toNode.node + "移动index:" + indexShade[0] + "  shade :" +
+                            indexShade[1] + "移动的大小 :" + indexShade[3] +
+                            "移动前容量大小为" + toNode.storeValue + "移动后为" +
+                            str(convert(toNode.storeValue) + convert(indexShade[3])) +
+                            "kb")
+
                 # 此处放上移动的命令
                 # 只要移动了一次
                 if (ifExecute):
-                    f(url, indexShade[0], indexShade[1], fromNode.node, toNode.node)
+                    f(url=url, index=indexShade[0], shard=indexShade[1], fromnode=fromNode, tonode=toNode,
+                      storeValue=indexShade[3])
+                fromNode.removeShade(indexShade)
+                toNode.addShade(indexShade)
+
                 return True
     return False
 
@@ -472,6 +516,11 @@ def main():
         showShardDistribute(NodeList)
 
     if (seeIfExecute):
+        # 如果要执行此命令  ，需要禁用掉es的自动分配
+        os.system(
+            command="curl -H \"Content-Type: application/json\"  -X PUT http://" + url + ":9200/_cluster/settings?pretty -d '{\"transient\": {\"cluster.routing.allocation.enable\": \"none\"}}'")
+        logger.info(
+            "====================================================临时禁用es的分区分配========================================================")
         showCap(NodeList, percent)
         logger.info("-------------------------开始按照计划执行--------------------------------")
         balanceDisk(percent, ifExecute=seeIfExecute)
