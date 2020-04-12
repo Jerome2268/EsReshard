@@ -68,6 +68,8 @@ def convert(store_size: str):
     # es 拿到的默认大小是none  ，而非 None
     if (store_size == "none"):
         return 0.0
+    if (store_size == None):
+        return 0.0
     dorr_store = 0.0
     if "k" in store_size:
         dorr_store += float(store_size[:-2])
@@ -82,10 +84,6 @@ def convert(store_size: str):
     elif "p" in store_size:
         dorr_store += float(store_size[:-2]) * 1024 * 1024 * 1024 * 1024 * 1024
     else:
-        print("store_size[:-2]", store_size[:-2])
-        print("store_size[:-1]", store_size[:-1])
-        print("store_size", store_size)
-
         dorr_store += float(store_size[:-1]) / 1024
     return dorr_store
 
