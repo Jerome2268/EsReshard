@@ -18,52 +18,55 @@ seeIfBalance = False
 seeExchangePlan = False
 seeIfExecute = False
 ifReverse = True
-if (len(sys.argv) == 1):
-    logger.info("usage: python3 EsReshard.py |-c|-s|-g|-r|   |-u + url|   |-p +percent|  ")
-    logger.info(
-        "usage:-c:showDiskStatus  -s : showBalancePlan  -g:follow the balance plan and execute    -r : Balance Strategy(big shard first or not )   -p:tolerance")
-if (sys.argv.__contains__("-c")):
-    seeIfBalance = True
-    logger.info("正在检查 ---- 请稍后")
-
-if (sys.argv.__contains__("-s")):
-    seeExchangePlan = True
-    logger.info("正在计算执行计划 ， 请稍后")
-if (sys.argv.__contains__("-g")):
-    seeIfExecute = True
-    logger.info("正在 准备执行平衡任务 ，请稍后")
-
-if (sys.argv.__contains__("-r")):
-    ifReverse = False
-if (sys.argv.__contains__("-u")):
-    for i in range(len(sys.argv)):
-        try:
-            if (sys.argv[i] == "-u"):
-                url = sys.argv[i + 1]
-                logger.info("设置连接 url 为 " + sys.argv[i + 1])
-
-        except IndexError:
-            logger.fatal("-u 参数输入有误  将使用默认值" + url)
-
-if (sys.argv.__contains__("-p")):
-    for i in range(len(sys.argv)):
-        try:
-            if (sys.argv[i] == "-p"):
-                percent = float(sys.argv[i + 1])
-                logger.info("设置容忍度为 " + str(percent * 100) + "%")
-
-        except IndexError:
-            logger.fatal("-p 参数输入有误  将使用默认值" + str(percent * 100) + "%")
-else:
-    logger.info("使用默认容忍度 " + str(percent * 100) + "%")
 # 默认第一个参数是当前的路径
 es = Elasticsearch([url],
                    sniff_on_start=True,  # 连接前测试
                    sniff_on_connection_fail=True,  # 节点无响应时刷新节点
                    sniff_timeout=60)  # 设置超时时间)
-if (es.ping()):
-    logger.info("successfully connected es cluster")
-logger.info(str(len(sys.argv)) + " : " + sys.argv[0] + " : " + sys.argv[1])
+if (len(sys.argv) == 1):
+    logger.info("usage: python3 EsReshard.py |-c|-s|-g|-r|   |-u + url|   |-p +percent|  ")
+    logger.info(
+        "usage:-c:showDiskStatus  -s : showBalancePlan  -g:follow the balance plan and execute    -r : Balance Strategy(big shard first or not )   -p:tolerance")
+else:
+    if (es.ping()):
+        logger.info("successfully connected es cluster")
+    logger.info(str(len(sys.argv)) + " : " + sys.argv[0] + " : " + sys.argv[1])
+
+    if (sys.argv.__contains__("-c")):
+        seeIfBalance = True
+        logger.info("正在检查 ---- 请稍后")
+
+    if (sys.argv.__contains__("-s")):
+        seeExchangePlan = True
+        logger.info("正在计算执行计划 ， 请稍后")
+    if (sys.argv.__contains__("-g")):
+        seeIfExecute = True
+        logger.info("正在 准备执行平衡任务 ，请稍后")
+
+    if (sys.argv.__contains__("-r")):
+        ifReverse = False
+    if (sys.argv.__contains__("-u")):
+        for i in range(len(sys.argv)):
+            try:
+                if (sys.argv[i] == "-u"):
+                    url = sys.argv[i + 1]
+                    logger.info("设置连接 url 为 " + sys.argv[i + 1])
+
+            except IndexError:
+                logger.fatal("-u 参数输入有误  将使用默认值" + url)
+
+    if (sys.argv.__contains__("-p")):
+        for i in range(len(sys.argv)):
+            try:
+                if (sys.argv[i] == "-p"):
+                    percent = float(sys.argv[i + 1])
+                    logger.info("设置容忍度为 " + str(percent * 100) + "%")
+
+            except IndexError:
+                logger.fatal("-p 参数输入有误  将使用默认值" + str(percent * 100) + "%")
+    else:
+        logger.info("使用默认容忍度 " + str(percent * 100) + "%")
+
 
 def convert(store_size: str):
     # es 拿到的默认大小是none  ，而非 None
