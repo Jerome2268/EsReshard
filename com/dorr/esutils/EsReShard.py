@@ -2,6 +2,7 @@
 # -*- coding: UTF-8 -*-
 # usage: python3 EsReshard.py |-c|-s|-g|-r|   |-u + url|   |-p +percent|
 # 使用此脚本需关闭es集群的自动平衡(脚本自动关闭) 否则影响平衡结果
+# cluster.routing.allocation.enable 为none了之后 谋私就不能新添加文档。。。。需要再手动改回来  或者指定分片 ？
 
 from elasticsearch import Elasticsearch
 import os
@@ -203,6 +204,7 @@ else:
             shard) + ",\"from_node\" : \"" + fromnode.node + "\",\"to_node\" : \"" + tonode.node + "\"}}]}' "
         flag = 1
         while not flag == 0:
+            # 该命令是幂等性的
             flag = os.system(command=command)
             file = open("execute.log", "a+")
             t = float(convert(storeValue) / 20)
@@ -446,7 +448,7 @@ else:
                     hUnBalanceList.append(node)
             # 通过length 来进行判断
             if (res and not len(lUnBalanceList) == 0 and not len(hUnBalanceList) == 0):
-                logger.info("开启higer list 和 lower list 间的balance操作")
+                logger.debug("开启higer list 和 lower list 间的balance操作")
                 # showCap(NodeList,percent)
                 res = change(lowerList=lUnBalanceList, higerList=hUnBalanceList, ifExecute=ifExecute)
                 # showCap(NodeList,percent)
@@ -454,36 +456,36 @@ else:
                 # 开始是lowlist 和 avglist 之间的一次性平衡
                 # 按照两个list的length 进行判断和哪一边做平衡
                 if (len(lUnBalanceList) >= len(hUnBalanceList)):
-                    logger.info("开始lowList 和 avgList 间的平衡操作----")
+                    logger.debug("开始lowList 和 avgList 间的平衡操作----")
                     res = changeLowerWithAvg(lowList=lUnBalanceList, avgList=avgList, percent=percent,
                                              ifExecute=ifExecute)
                     if (not res):
-                        logger.info("开始在highlist 和 avglist之间做均衡>>>")
+                        logger.debug("开始在highlist 和 avglist之间做均衡>>>")
                         res = changeHighListWithAvg(avgList=avgList, highNode=hUnBalanceList, percent=percent,
                                                     ifExecute=ifExecute)
                         if (not res):
-                            logger.fatal("移动完成 , 无法完全平衡")
+                            logger.info("移动完成 , 无法完全平衡")
                             return
                 else:
                     # 和 avglist 做均衡策略  结束点需要保证
-                    logger.info("开始在highlist 和 avglist之间做均衡----")
+                    logger.debug("开始在highlist 和 avglist之间做均衡----")
                     res = changeHighListWithAvg(avgList=avgList, highNode=hUnBalanceList, percent=percent,
                                                 ifExecute=ifExecute)
                     if (not res):
-                        logger.info("开始lowList 和 avgList 间的平衡操作>>>")
+                        logger.debug("开始lowList 和 avgList 间的平衡操作>>>")
                         res = changeLowerWithAvg(lowList=lUnBalanceList, avgList=avgList, percent=percent,
                                                  ifExecute=ifExecute)
                         if (not res):
-                            logger.fatal("移动完成 , 无法完全平衡")
+                            logger.info("移动完成 , 无法完全平衡")
                             return
 
             elif (hRes and not len(avgList) == 0 and len(lUnBalanceList) == 0 and not len(hUnBalanceList) == 0):
-                logger.info("开始avg list 和 h list之间的平衡")
+                logger.debug("开始avg list 和 h list之间的平衡")
                 hRes = changeHighListWithAvg(avgList=avgList, highNode=hUnBalanceList, percent=percent,
                                              ifExecute=ifExecute)
 
             elif (lRes and not len(avgList) == 0 and not len(lUnBalanceList) == 0 and len(hUnBalanceList) == 0):
-                logger.info("开始在avg list 和 l list 之间的平衡")
+                logger.debug("开始在avg list 和 l list 之间的平衡")
                 lRes = changeLowerWithAvg(lowList=lUnBalanceList, avgList=avgList, percent=percent, ifExecute=ifExecute)
             else:
                 count += 1
@@ -542,18 +544,10 @@ else:
                 nod = Node_Shade(m)
                 computeStoreSize(shards=res, node=m, nod=nod)
                 NodeList2.append(nod)
-            checkIfDiskBalance(percent=percent, nodeList=NodeList)
             showCap(percent=percent, nodeList=NodeList)
             # 保险起见  重新查询以便看结果是否一致
             checkIfDiskBalance(percent=percent, nodeList=NodeList2)
-            for node2 in NodeList2:
-                if node2 not in NodeList:
-                    logger.fatal("移动失败 ， 中间过程恐有变动")
-                    logger.fatal("------------------------预计移动结果--------------------------")
-                    showCap(NodeList, percent)
-                    logger.fatal("------------------------实际移动结果--------------------------")
-                    showCap(NodeList2, percent)
-                    return
+            logger.info("-----------------------节点对应的shard分配-----------------------------")
             showShardDistribute(NodeList2)
 
 
